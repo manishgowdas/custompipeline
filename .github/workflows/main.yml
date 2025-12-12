@@ -40,7 +40,7 @@ jobs:
       run: |
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
         echo "ROLE_TO_ASSUME=arn:aws:iam::${AWS_ACCOUNT_ID}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
-        echo "AWS_REGION=ap-south-1" >> $GITHUB_ENV
+        echo "AWS_REGION=ap-northeast-2" >> $GITHUB_ENV
 
     - name: Configure AWS credentials via OIDC
       uses: aws-actions/configure-aws-credentials@v4
@@ -58,7 +58,7 @@ jobs:
     - name: Set cluster name
       run: |
         case "${{ github.event.inputs.environment }}" in
-          dev)   echo "CLUSTER_NAME=dev-eks-cluster"   >> $GITHUB_ENV ;;
+          dev)   echo "CLUSTER_NAME=mycluster"   >> $GITHUB_ENV ;;
           stage) echo "CLUSTER_NAME=stage-eks-cluster" >> $GITHUB_ENV ;;
           prod)  echo "CLUSTER_NAME=prod-eks-cluster"  >> $GITHUB_ENV ;;
         esac
