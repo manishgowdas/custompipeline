@@ -3,6 +3,15 @@ name: Deploy EKS Addons
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Target environment (dev, stage, prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
       addon:
         description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana)"
         required: true
@@ -19,28 +28,36 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      id-token: write       # Required for OIDC
       contents: read
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # --- FIXED: Correct role ARN construction ---
+    # --- FIXED: Proper AWS Role ARN construction ---
     - name: Set AWS Role ARN
       run: |
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
         echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
         echo "AWS_REGION=ap-northeast-2" >> $GITHUB_ENV
-        echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV
 
-    # --- Debug (optional, recommended for first test) ---
-    - name: Debug values
+    # --- Environment-to-cluster mapping ---
+    - name: Set cluster name
       run: |
-        echo "Using AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
-        echo "Using ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
-        echo "Using AWS_REGION=$AWS_REGION"
-        echo "Using CLUSTER_NAME=$CLUSTER_NAME"
+        case "${{ github.event.inputs.environment }}" in
+          dev)   echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
+          stage) echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
+          prod)  echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
+        esac
+
+    # Debug output (safe)
+    - name: Debug info
+      run: |
+        echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+        echo "ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
+        echo "Region=$AWS_REGION"
+        echo "Cluster=$CLUSTER_NAME"
 
     - name: Configure AWS credentials via OIDC
       uses: aws-actions/configure-aws-credentials@v4
@@ -58,7 +75,8 @@ jobs:
     - name: Update kubeconfig for EKS
       run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
 
-    # --- Conditional: Metrics Server ---
+
+    # --- Metrics Server ---
     - name: Deploy Metrics Server
       if: ${{ github.event.inputs.addon == 'metric-server' }}
       run: |
@@ -66,7 +84,8 @@ jobs:
         helm upgrade --install metrics-server metrics-server/metrics-server \
           --namespace kube-system --create-namespace
 
-    # --- Conditional: AWS Load Balancer Controller ---
+
+    # --- AWS Load Balancer Controller ---
     - name: Ensure IAM Policy
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -85,6 +104,7 @@ jobs:
       run: |
         OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
           --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
+
         cat > trust.json <<EOF
         {
           "Version": "2012-10-17",
@@ -104,6 +124,7 @@ jobs:
           ]
         }
         EOF
+
         if ! aws iam get-role --role-name AWSLoadBalancerControllerRole >/dev/null 2>&1; then
           aws iam create-role \
             --role-name AWSLoadBalancerControllerRole \
@@ -120,6 +141,7 @@ jobs:
       run: |
         kubectl get sa aws-load-balancer-controller -n kube-system >/dev/null 2>&1 || \
           kubectl create serviceaccount aws-load-balancer-controller -n kube-system
+
         kubectl annotate serviceaccount aws-load-balancer-controller \
           -n kube-system \
           eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/AWSLoadBalancerControllerRole --overwrite
@@ -134,6 +156,7 @@ jobs:
           --set serviceAccount.create=false \
           --set serviceAccount.name=aws-load-balancer-controller
 
+
     # --- ArgoCD ---
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
@@ -141,6 +164,7 @@ jobs:
         helm repo add argo https://argoproj.github.io/argo-helm
         helm upgrade --install argocd argo/argo-cd \
           --namespace argocd --create-namespace
+
 
     # --- Prometheus ---
     - name: Deploy Prometheus
@@ -150,12 +174,10 @@ jobs:
         helm repo update
         helm upgrade --install prometheus prometheus-community/prometheus \
           --namespace monitoring --create-namespace \
-          --set alertmanager.persistentVolume.enabled=true \
-          --set alertmanager.persistentVolume.storageClass=gp2 \
-          --set alertmanager.persistentVolume.size=5Gi \
           --set server.persistentVolume.enabled=true \
           --set server.persistentVolume.storageClass=gp2 \
           --set server.persistentVolume.size=10Gi
+
 
     # --- Grafana ---
     - name: Deploy Grafana
