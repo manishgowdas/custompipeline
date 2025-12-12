@@ -3,17 +3,8 @@ name: Deploy EKS Addons
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: "Target environment (dev, stage, prod)"
-        required: true
-        default: "dev"
-        type: choice
-        options:
-          - dev
-          - stage
-          - prod
       addon:
-        description: "Addon to deploy (alb, metric-server, argocd)"
+        description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana)"
         required: true
         default: "alb"
         type: choice
@@ -35,33 +26,34 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # Single account ID from GitHub secret/variable
+    # --- FIXED: Correct role ARN construction ---
     - name: Set AWS Role ARN
       run: |
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
-        echo "ROLE_TO_ASSUME=arn:aws:iam::${AWS_ACCOUNT_ID}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
+        echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
         echo "AWS_REGION=ap-northeast-2" >> $GITHUB_ENV
+        echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV
+
+    # --- Debug (optional, recommended for first test) ---
+    - name: Debug values
+      run: |
+        echo "Using AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+        echo "Using ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
+        echo "Using AWS_REGION=$AWS_REGION"
+        echo "Using CLUSTER_NAME=$CLUSTER_NAME"
 
     - name: Configure AWS credentials via OIDC
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ env.ROLE_TO_ASSUME }}
         aws-region: ${{ env.AWS_REGION }}
+        audience: sts.amazonaws.com
 
     - name: Setup kubectl
       uses: azure/setup-kubectl@v3
 
     - name: Setup helm
       uses: azure/setup-helm@v3
-
-    # Map environment input to cluster name
-    - name: Set cluster name
-      run: |
-        case "${{ github.event.inputs.environment }}" in
-          dev)   echo "CLUSTER_NAME=mycluster"   >> $GITHUB_ENV ;;
-          stage) echo "CLUSTER_NAME=stage-eks-cluster" >> $GITHUB_ENV ;;
-          prod)  echo "CLUSTER_NAME=prod-eks-cluster"  >> $GITHUB_ENV ;;
-        esac
 
     - name: Update kubeconfig for EKS
       run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
@@ -79,7 +71,7 @@ jobs:
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
         curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
-        POLICY_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy"
+        POLICY_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy"
         if ! aws iam get-policy --policy-arn $POLICY_ARN >/dev/null 2>&1; then
           aws iam create-policy \
             --policy-name AWSLoadBalancerControllerIAMPolicy \
@@ -100,7 +92,7 @@ jobs:
             {
               "Effect": "Allow",
               "Principal": {
-                "Federated": "arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/${OIDC_PROVIDER}"
+                "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
               },
               "Action": "sts:AssumeRoleWithWebIdentity",
               "Condition": {
@@ -118,7 +110,7 @@ jobs:
             --assume-role-policy-document file://trust.json
           aws iam attach-role-policy \
             --role-name AWSLoadBalancerControllerRole \
-            --policy-arn arn:aws:iam::${AWS_ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy
+            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy
         else
           echo "Role already exists, skipping..."
         fi
@@ -130,7 +122,7 @@ jobs:
           kubectl create serviceaccount aws-load-balancer-controller -n kube-system
         kubectl annotate serviceaccount aws-load-balancer-controller \
           -n kube-system \
-          eks.amazonaws.com/role-arn=arn:aws:iam::${AWS_ACCOUNT_ID}:role/AWSLoadBalancerControllerRole --overwrite
+          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/AWSLoadBalancerControllerRole --overwrite
 
     - name: Deploy AWS Load Balancer Controller
       if: ${{ github.event.inputs.addon == 'alb' }}
@@ -142,7 +134,7 @@ jobs:
           --set serviceAccount.create=false \
           --set serviceAccount.name=aws-load-balancer-controller
 
-    # --- Conditional: ArgoCD ---
+    # --- ArgoCD ---
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
       run: |
@@ -150,7 +142,7 @@ jobs:
         helm upgrade --install argocd argo/argo-cd \
           --namespace argocd --create-namespace
 
-    # --- Conditional: Prometheus ---
+    # --- Prometheus ---
     - name: Deploy Prometheus
       if: ${{ github.event.inputs.addon == 'prometheus' }}
       run: |
@@ -165,11 +157,11 @@ jobs:
           --set server.persistentVolume.storageClass=gp2 \
           --set server.persistentVolume.size=10Gi
 
-    # --- Conditional: Grafana ---
+    # --- Grafana ---
     - name: Deploy Grafana
       if: ${{ github.event.inputs.addon == 'grafana' }}
       run: |
         helm repo add grafana https://grafana.github.io/helm-charts
         helm repo update
         helm upgrade --install grafana grafana/grafana \
-          --namespace
+          --namespace monitoring --create-namespace
