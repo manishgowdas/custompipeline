@@ -23,6 +23,10 @@ on:
           - argocd
           - prometheus
           - grafana
+      vpc_id:
+        description: "VPC ID (required only for ALB controller)"
+        required: false
+        type: string
 
 jobs:
   deploy:
@@ -146,6 +150,14 @@ jobs:
         kubectl annotate serviceaccount aws-load-balancer-controller \
           -n kube-system \
           eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/AWSLoadBalancerControllerRole --overwrite
+    - name: Validate VPC ID for ALB
+      if: ${{ github.event.inputs.addon == 'alb' }}
+      run: |
+        if [ -z "${{ github.event.inputs.vpc_id }}" ]; then
+          echo "Error: VPC ID is required for ALB controller deployment"
+          exit 1
+        fi
+    
     - name: Deploy AWS Load Balancer Controller
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -154,7 +166,8 @@ jobs:
           --namespace kube-system --create-namespace \
           --set clusterName=$CLUSTER_NAME \
           --set serviceAccount.create=false \
-          --set serviceAccount.name=aws-load-balancer-controller
+          --set serviceAccount.name=aws-load-balancer-controller \
+          --set vpcId=${{ github.event.inputs.vpc_id }}
     # --- ArgoCD ---
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
