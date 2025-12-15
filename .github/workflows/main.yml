@@ -15,6 +15,10 @@ on:
         default: "alb"
         type: choice
         options: [alb, metric-server, argocd, prometheus, grafana]
+      vpc_id:
+        description: "VPC ID (required only for ALB addon)"
+        required: false
+        default: ""
 
 jobs:
   deploy:
@@ -77,6 +81,15 @@ jobs:
         fi
 
     # --- AWS Load Balancer Controller ---
+    - name: Set VPC ID
+      if: ${{ github.event.inputs.addon == 'alb' }}
+      run: |
+        if [ -z "${{ github.event.inputs.vpc_id }}" ]; then
+          echo "Error: VPC ID must be provided for ALB addon deployment"
+          exit 1
+        fi
+        echo "VPC_ID=${{ github.event.inputs.vpc_id }}" >> $GITHUB_ENV
+
     - name: Ensure IAM Policy
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -144,11 +157,7 @@ jobs:
           echo "AWS Load Balancer Controller already installed, skipping..."
         else
           helm repo add eks https://aws.github.io/eks-charts
-          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-            --namespace kube-system --create-namespace \
-            --set clusterName=$CLUSTER_NAME \
-            --set serviceAccount.create=false \
-            --set serviceAccount.name=aws-load-balancer-controller
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller --namespace kube-system --create-namespace --set clusterName=$CLUSTER_NAME --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller --set vpcId=$VPC_ID
         fi
 
     # --- ArgoCD ---
