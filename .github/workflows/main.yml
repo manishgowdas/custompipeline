@@ -15,11 +15,6 @@ on:
         default: "alb"
         type: choice
         options: [alb, metric-server, argocd, prometheus, grafana]
-      vpc_id:
-        description: "VPC ID (required for ALB controller)"
-        required: false
-        default: ""
-        type: string
 
 jobs:
   deploy:
@@ -37,7 +32,6 @@ jobs:
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
         echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
         echo "AWS_REGION=ap-northeast-2" >> $GITHUB_ENV
-        echo "VPC_ID=${{ github.event.inputs.vpc_id }}" >> $GITHUB_ENV
 
     - name: Set cluster name
       run: |
@@ -53,7 +47,6 @@ jobs:
         echo "ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
         echo "Region=$AWS_REGION"
         echo "Cluster=$CLUSTER_NAME"
-        echo "VPC_ID=$VPC_ID"
 
     - name: Configure AWS credentials via OIDC
       uses: aws-actions/configure-aws-credentials@v4
@@ -106,24 +99,24 @@ jobs:
           OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
             --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
           cat > trust.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "${OIDC_PROVIDER}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
-        }
-      }
-    }
-  ]
-}
-EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "${OIDC_PROVIDER}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
           aws iam create-role \
             --role-name AWSLoadBalancerControllerRole \
             --assume-role-policy-document file://trust.json
@@ -155,8 +148,7 @@ EOF
             --namespace kube-system --create-namespace \
             --set clusterName=$CLUSTER_NAME \
             --set serviceAccount.create=false \
-            --set serviceAccount.name=aws-load-balancer-controller \
-            --set vpcId=$VPC_ID
+            --set serviceAccount.name=aws-load-balancer-controller
         fi
 
     # --- ArgoCD ---
