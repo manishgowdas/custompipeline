@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment (dev, stage, prod)"
+        description: "Target environment"
         required: true
         default: "dev"
         type: choice
@@ -12,6 +12,25 @@ on:
           - dev
           - stage
           - prod
+      cluster_name:
+        description: "EKS Cluster Name"
+        required: true
+        type: choice
+        options:
+          - eks-dev-cluster
+          - eks-stage-cluster
+          - eks-prod-cluster
+      region:
+        description: "AWS Region"
+        required: true
+        default: "ap-south-1"
+        type: choice
+        options:
+          - us-east-1
+          - us-west-2
+          - ap-south-1
+          - ap-northeast-2
+          - eu-west-1
       addon:
         description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana, karpenter)"
         required: true
@@ -40,20 +59,14 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # --- FIXED: Proper AWS Role ARN construction ---
-    - name: Set AWS Role ARN
+    # --- Set environment variables ---
+    - name: Set environment variables
       run: |
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
         echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
-        echo "AWS_REGION=ap-south-1" >> $GITHUB_ENV
-    # --- Environment-to-cluster mapping ---
-    - name: Set cluster name
-      run: |
-        case "${{ github.event.inputs.environment }}" in
-          dev)   echo "CLUSTER_NAME=eks-dev-cluster" >> $GITHUB_ENV ;;
-          stage) echo "CLUSTER_NAME=eks-stage-cluster" >> $GITHUB_ENV ;;
-          prod)  echo "CLUSTER_NAME=eks-prod-cluster" >> $GITHUB_ENV ;;
-        esac
+        echo "AWS_REGION=${{ github.event.inputs.region }}" >> $GITHUB_ENV
+        echo "CLUSTER_NAME=${{ github.event.inputs.cluster_name }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
     # Debug output (safe)
     - name: Debug info
       run: |
@@ -104,7 +117,7 @@ jobs:
       run: |
         curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
         if aws iam create-policy \
-            --policy-name AWSLoadBalancerControllerIAMPolicy \
+            --policy-name $ENVIRONMENT-alb-controller-policy \
             --policy-document file://iam_policy.json >/dev/null 2>&1; then
           echo "Policy created successfully"
         else
@@ -135,12 +148,12 @@ jobs:
         }
         EOF
         if aws iam create-role \
-            --role-name AWSLoadBalancerControllerRole \
+            --role-name $ENVIRONMENT-alb-controller-role \
             --assume-role-policy-document file://trust.json >/dev/null 2>&1; then
           echo "Role created successfully"
           aws iam attach-role-policy \
-            --role-name AWSLoadBalancerControllerRole \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy
+            --role-name $ENVIRONMENT-alb-controller-role \
+            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy
         else
           echo "Role already exists, skipping..."
         fi
@@ -151,7 +164,7 @@ jobs:
           kubectl create serviceaccount aws-load-balancer-controller -n kube-system
         kubectl annotate serviceaccount aws-load-balancer-controller \
           -n kube-system \
-          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/AWSLoadBalancerControllerRole --overwrite
+          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-alb-controller-role --overwrite
     - name: Validate VPC ID for ALB
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -259,7 +272,7 @@ jobs:
         }
         EOF
         if aws iam create-policy \
-            --policy-name KarpenterControllerIAMPolicy \
+            --policy-name $ENVIRONMENT-karpenter-controller-policy \
             --policy-document file://karpenter-policy.json >/dev/null 2>&1; then
           echo "Karpenter policy created successfully"
         else
@@ -292,12 +305,12 @@ jobs:
         }
         EOF
         if aws iam create-role \
-            --role-name KarpenterControllerIAMRole \
+            --role-name $ENVIRONMENT-karpenter-controller-role \
             --assume-role-policy-document file://karpenter-trust.json >/dev/null 2>&1; then
           echo "Karpenter controller role created successfully"
           aws iam attach-role-policy \
-            --role-name KarpenterControllerIAMRole \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerIAMPolicy
+            --role-name $ENVIRONMENT-karpenter-controller-role \
+            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy
         else
           echo "Karpenter controller role already exists, skipping..."
         fi
@@ -320,20 +333,20 @@ jobs:
         }
         EOF
         if aws iam create-role \
-            --role-name KarpenterNodeInstanceProfile \
+            --role-name $ENVIRONMENT-karpenter-node-role \
             --assume-role-policy-document file://karpenter-node-trust.json >/dev/null 2>&1; then
           echo "Karpenter node role created successfully"
           aws iam attach-role-policy \
-            --role-name KarpenterNodeInstanceProfile \
+            --role-name $ENVIRONMENT-karpenter-node-role \
             --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
           aws iam attach-role-policy \
-            --role-name KarpenterNodeInstanceProfile \
+            --role-name $ENVIRONMENT-karpenter-node-role \
             --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
           aws iam attach-role-policy \
-            --role-name KarpenterNodeInstanceProfile \
+            --role-name $ENVIRONMENT-karpenter-node-role \
             --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
           aws iam attach-role-policy \
-            --role-name KarpenterNodeInstanceProfile \
+            --role-name $ENVIRONMENT-karpenter-node-role \
             --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         else
           echo "Karpenter node role already exists, skipping..."
@@ -348,7 +361,7 @@ jobs:
         kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
         kubectl annotate serviceaccount karpenter \
           -n karpenter \
-          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/KarpenterControllerIAMRole --overwrite
+          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
         helm upgrade --install karpenter karpenter/karpenter \
           --create-namespace \
           --namespace karpenter \
@@ -356,4 +369,4 @@ jobs:
           --set serviceAccount.name=karpenter \
           --set clusterName=$CLUSTER_NAME \
           --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
-          --set aws.defaultInstanceProfile=KarpenterNodeInstanceProfile
+          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
