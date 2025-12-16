@@ -87,6 +87,7 @@ jobs:
         kubectl delete service metrics-server -n kube-system --ignore-not-found=true
         kubectl delete rolebinding metrics-server-auth-reader -n kube-system --ignore-not-found=true
         kubectl delete clusterrolebinding metrics-server:system:auth-delegator --ignore-not-found=true
+        kubectl delete clusterrolebinding system:metrics-server --ignore-not-found=true
         kubectl delete clusterrole system:metrics-server --ignore-not-found=true
         kubectl delete clusterrole system:metrics-server-aggregated-reader --ignore-not-found=true
         kubectl delete serviceaccount metrics-server -n kube-system --ignore-not-found=true
