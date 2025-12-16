@@ -350,6 +350,7 @@ jobs:
           -n karpenter \
           eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/KarpenterControllerIAMRole --overwrite
         helm upgrade --install karpenter karpenter/karpenter \
+          --create-namespace \
           --namespace karpenter \
           --set serviceAccount.create=false \
           --set serviceAccount.name=karpenter \
