@@ -206,16 +206,13 @@ jobs:
           --set server.persistentVolume.storageClass=gp2 \
           --set server.persistentVolume.size=10Gi
     # --- Grafana ---
-    - name: Ensure monitoring namespace exists 
-      run: | 
-        kubectl get namespace monitoring || kubectl create namespace monitoring
     - name: Deploy Grafana
       if: ${{ github.event.inputs.addon == 'grafana' }}
       run: |
         helm repo add grafana https://grafana.github.io/helm-charts
         helm repo update
         helm upgrade --install grafana grafana/grafana \
-          --namespace monitoring 
+          --namespace monitoring --create-namespace 
     
     # --- Karpenter ---
     - name: Create Karpenter IAM Policy
