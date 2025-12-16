@@ -13,7 +13,7 @@ on:
           - stage
           - prod
       addon:
-        description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana)"
+        description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana, karpenter)"
         required: true
         default: "alb"
         type: choice
@@ -23,6 +23,7 @@ on:
           - argocd
           - prometheus
           - grafana
+          - karpenter
       vpc_id:
         description: "VPC ID (required only for ALB controller)"
         required: false
@@ -194,3 +195,151 @@ jobs:
         helm repo update
         helm upgrade --install grafana grafana/grafana \
           --namespace monitoring --create-namespace
+    
+    # --- Karpenter ---
+    - name: Create Karpenter IAM Policy
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        POLICY_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerIAMPolicy"
+        if ! aws iam get-policy --policy-arn $POLICY_ARN >/dev/null 2>&1; then
+          cat > karpenter-policy.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:GetParameter",
+                "iam:PassRole",
+                "ec2:DescribeImages",
+                "ec2:RunInstances",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeInstanceTypeOfferings",
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:CreateTags",
+                "ec2:CreateLaunchTemplate",
+                "ec2:CreateFleet",
+                "ec2:DescribeSpotPriceHistory",
+                "pricing:GetProducts"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": "ec2:TerminateInstances",
+              "Resource": "*",
+              "Condition": {
+                "StringLike": {
+                  "ec2:ResourceTag/karpenter.sh/cluster": "*"
+                }
+              }
+            }
+          ]
+        }
+        EOF
+          aws iam create-policy \
+            --policy-name KarpenterControllerIAMPolicy \
+            --policy-document file://karpenter-policy.json
+        else
+          echo "Karpenter policy already exists, skipping..."
+        fi
+    
+    - name: Create Karpenter Controller IAM Role
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
+          --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
+        cat > karpenter-trust.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "${OIDC_PROVIDER}:sub": "system:serviceaccount:karpenter:karpenter",
+                  "${OIDC_PROVIDER}:aud": "sts.amazonaws.com"
+                }
+              }
+            }
+          ]
+        }
+        EOF
+        if ! aws iam get-role --role-name KarpenterControllerIAMRole >/dev/null 2>&1; then
+          aws iam create-role \
+            --role-name KarpenterControllerIAMRole \
+            --assume-role-policy-document file://karpenter-trust.json
+          aws iam attach-role-policy \
+            --role-name KarpenterControllerIAMRole \
+            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerIAMPolicy
+        else
+          echo "Karpenter controller role already exists, skipping..."
+        fi
+    
+    - name: Create Karpenter Node IAM Role
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        cat > karpenter-node-trust.json <<EOF
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+        EOF
+        if ! aws iam get-role --role-name KarpenterNodeInstanceProfile >/dev/null 2>&1; then
+          aws iam create-role \
+            --role-name KarpenterNodeInstanceProfile \
+            --assume-role-policy-document file://karpenter-node-trust.json
+          aws iam attach-role-policy \
+            --role-name KarpenterNodeInstanceProfile \
+            --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+          aws iam attach-role-policy \
+            --role-name KarpenterNodeInstanceProfile \
+            --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+          aws iam attach-role-policy \
+            --role-name KarpenterNodeInstanceProfile \
+            --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+          aws iam attach-role-policy \
+            --role-name KarpenterNodeInstanceProfile \
+            --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+          aws iam create-instance-profile --instance-profile-name KarpenterNodeInstanceProfile
+          aws iam add-role-to-instance-profile \
+            --instance-profile-name KarpenterNodeInstanceProfile \
+            --role-name KarpenterNodeInstanceProfile
+        else
+          echo "Karpenter node role already exists, skipping..."
+        fi
+    
+    - name: Deploy Karpenter
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        helm repo add karpenter https://charts.karpenter.sh/
+        helm repo update
+        kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
+        kubectl annotate serviceaccount karpenter \
+          -n karpenter \
+          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/KarpenterControllerIAMRole --overwrite
+        helm upgrade --install karpenter karpenter/karpenter \
+          --namespace karpenter \
+          --set serviceAccount.create=false \
+          --set serviceAccount.name=karpenter \
+          --set clusterName=$CLUSTER_NAME \
+          --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
+          --set aws.defaultInstanceProfile=KarpenterNodeInstanceProfile
