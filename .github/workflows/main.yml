@@ -160,6 +160,12 @@ jobs:
           exit 1
         fi
     
+    - name: Install ALB Controller CRDs
+      if: ${{ github.event.inputs.addon == 'alb' }}
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml
+    
     - name: Deploy AWS Load Balancer Controller
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -169,8 +175,7 @@ jobs:
           --set clusterName=$CLUSTER_NAME \
           --set serviceAccount.create=false \
           --set serviceAccount.name=aws-load-balancer-controller \
-          --set vpcId="${{ github.event.inputs.vpc_id }}" \
-          --set installCRDs=true
+          --set vpcId="${{ github.event.inputs.vpc_id }}"
     # --- ArgoCD ---
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
