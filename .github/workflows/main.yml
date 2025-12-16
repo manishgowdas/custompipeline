@@ -50,7 +50,7 @@ jobs:
     - name: Set cluster name
       run: |
         case "${{ github.event.inputs.environment }}" in
-          dev)   echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
+          dev)   echo "CLUSTER_NAME=eks-dev-cluster" >> $GITHUB_ENV ;;
           stage) echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
           prod)  echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
         esac
