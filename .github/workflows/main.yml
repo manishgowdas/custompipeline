@@ -103,11 +103,10 @@ jobs:
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
         curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
-        POLICY_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy"
-        if ! aws iam get-policy --policy-arn $POLICY_ARN >/dev/null 2>&1; then
-          aws iam create-policy \
+        if aws iam create-policy \
             --policy-name AWSLoadBalancerControllerIAMPolicy \
-            --policy-document file://iam_policy.json
+            --policy-document file://iam_policy.json >/dev/null 2>&1; then
+          echo "Policy created successfully"
         else
           echo "Policy already exists, skipping..."
         fi
