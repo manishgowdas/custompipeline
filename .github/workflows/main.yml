@@ -169,7 +169,8 @@ jobs:
           --set clusterName=$CLUSTER_NAME \
           --set serviceAccount.create=false \
           --set serviceAccount.name=aws-load-balancer-controller \
-          --set vpcId="${{ github.event.inputs.vpc_id }}"
+          --set vpcId="${{ github.event.inputs.vpc_id }}" \
+          --set installCRDs=true
     # --- ArgoCD ---
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
