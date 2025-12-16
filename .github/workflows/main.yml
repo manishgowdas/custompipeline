@@ -45,12 +45,12 @@ jobs:
       run: |
         echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
         echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
-        echo "AWS_REGION=ap-south-1" >> $GITHUB_ENV
+        echo "AWS_REGION=ap-northeast-2" >> $GITHUB_ENV
     # --- Environment-to-cluster mapping ---
     - name: Set cluster name
       run: |
         case "${{ github.event.inputs.environment }}" in
-          dev)   echo "CLUSTER_NAME=eks-dev-cluster" >> $GITHUB_ENV ;;
+          dev)   echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
           stage) echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
           prod)  echo "CLUSTER_NAME=mycluster" >> $GITHUB_ENV ;;
         esac
@@ -77,11 +77,6 @@ jobs:
     - name: Update kubeconfig for EKS
       run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
 
-    - name: Verify kubeconfig
-      run: |
-        cat ~/.kube/config
-        kubectl get nodes
-
 
     # --- Metrics Server ---
     - name: Deploy Metrics Server
@@ -93,6 +88,7 @@ jobs:
         kubectl delete rolebinding metrics-server-auth-reader -n kube-system --ignore-not-found=true
         kubectl delete clusterrolebinding metrics-server:system:auth-delegator --ignore-not-found=true
         kubectl delete clusterrole system:metrics-server --ignore-not-found=true
+        kubectl delete clusterrole system:metrics-server-aggregated-reader --ignore-not-found=true
         kubectl delete serviceaccount metrics-server -n kube-system --ignore-not-found=true
         kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found=true
         
@@ -178,7 +174,15 @@ jobs:
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
       run: |
+        # Remove existing ArgoCD resources
+        kubectl delete namespace argocd --ignore-not-found=true
+        kubectl delete clusterrole argocd-application-controller --ignore-not-found=true
+        kubectl delete clusterrole argocd-server --ignore-not-found=true
+        kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true
+        kubectl delete clusterrolebinding argocd-server --ignore-not-found=true
+        
         helm repo add argo https://argoproj.github.io/argo-helm
+        helm repo update
         helm upgrade --install argocd argo/argo-cd \
           --namespace argocd --create-namespace
     # --- Prometheus ---
