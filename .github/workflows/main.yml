@@ -134,10 +134,10 @@ jobs:
           ]
         }
         EOF
-        if ! aws iam get-role --role-name AWSLoadBalancerControllerRole >/dev/null 2>&1; then
-          aws iam create-role \
+        if aws iam create-role \
             --role-name AWSLoadBalancerControllerRole \
-            --assume-role-policy-document file://trust.json
+            --assume-role-policy-document file://trust.json >/dev/null 2>&1; then
+          echo "Role created successfully"
           aws iam attach-role-policy \
             --role-name AWSLoadBalancerControllerRole \
             --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy
