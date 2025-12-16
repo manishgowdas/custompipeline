@@ -175,7 +175,18 @@ jobs:
     - name: Deploy ArgoCD
       if: ${{ github.event.inputs.addon == 'argocd' }}
       run: |
+        # Remove existing ArgoCD resources
+        kubectl delete namespace argocd --ignore-not-found=true
+        kubectl delete crd applications.argoproj.io --ignore-not-found=true
+        kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true
+        kubectl delete crd appprojects.argoproj.io --ignore-not-found=true
+        kubectl delete clusterrole argocd-application-controller --ignore-not-found=true
+        kubectl delete clusterrole argocd-server --ignore-not-found=true
+        kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true
+        kubectl delete clusterrolebinding argocd-server --ignore-not-found=true
+        
         helm repo add argo https://argoproj.github.io/argo-helm
+        helm repo update
         helm upgrade --install argocd argo/argo-cd \
           --namespace argocd --create-namespace
     # --- Prometheus ---
