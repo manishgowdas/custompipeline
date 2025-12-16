@@ -77,6 +77,11 @@ jobs:
     - name: Update kubeconfig for EKS
       run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
 
+    - name: Verify kubeconfig
+      run: |
+        cat ~/.kube/config
+        kubectl get nodes
+
 
     # --- Metrics Server ---
     - name: Deploy Metrics Server
