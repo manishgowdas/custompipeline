@@ -1,0 +1,72 @@
+# values.yaml for prometheus-community/prometheus
+
+# Global scrape/evaluation intervals
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+# Alertmanager
+alertmanager:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: gp3   # change to your EKS storage class
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+
+# Prometheus server
+server:
+  enabled: true
+  service:
+    type: LoadBalancer
+    port: 80
+  persistentVolume:
+    enabled: true
+    size: 10Gi
+    storageClass: gp3   # adjust per environment
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1
+      memory: 2Gi
+  ingress:
+    enabled: false   # set true if you want ALB ingress
+    annotations: {}
+    hosts: []
+    paths: []
+
+# Node exporter
+nodeExporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# kube-state-metrics
+kubeStateMetrics:
+  enabled: true
+
+# Pushgateway
+pushgateway:
+  enabled: false
+
+# Extra scrape configs for custom apps
+extraScrapeConfigs: |
+  - job_name: 'custom-app'
+    static_configs:
+      - targets: ['my-app.monitoring.svc.cluster.local:8080']
