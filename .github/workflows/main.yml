@@ -105,7 +105,7 @@ jobs:
         kubectl delete clusterrole system:metrics-server-aggregated-reader --ignore-not-found=true
         kubectl delete serviceaccount metrics-server -n kube-system --ignore-not-found=true
         kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found=true
-        
+
         # Install with Helm
         helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
         helm repo update
@@ -172,13 +172,13 @@ jobs:
           echo "Error: VPC ID is required for ALB controller deployment"
           exit 1
         fi
-    
+
     - name: Install ALB Controller CRDs
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
         kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml
         kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml
-    
+
     - name: Deploy AWS Load Balancer Controller
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
@@ -202,7 +202,7 @@ jobs:
         kubectl delete clusterrole argocd-server --ignore-not-found=true
         kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true
         kubectl delete clusterrolebinding argocd-server --ignore-not-found=true
-        
+
         helm repo add argo https://argoproj.github.io/argo-helm
         helm repo update
         helm upgrade --install argocd argo/argo-cd \
@@ -213,7 +213,7 @@ jobs:
       run: |
         # Delete existing PVC to avoid storage class conflicts
         kubectl delete pvc prometheus-server -n monitoring --ignore-not-found=true
-        
+
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo update
         helm upgrade --install prometheus prometheus-community/prometheus \
@@ -228,7 +228,7 @@ jobs:
         helm repo update
         helm upgrade --install grafana grafana/grafana \
           --namespace monitoring --create-namespace 
-    
+
     # --- Karpenter ---
     - name: Create Karpenter IAM Policy
       if: ${{ github.event.inputs.addon == 'karpenter' }}
@@ -280,7 +280,7 @@ jobs:
         else
           echo "Karpenter policy already exists, skipping..."
         fi
-    
+
     - name: Create Karpenter Controller IAM Role
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
@@ -316,7 +316,7 @@ jobs:
         else
           echo "Karpenter controller role already exists, skipping..."
         fi
-    
+
     - name: Create Karpenter Node IAM Role
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
@@ -353,7 +353,7 @@ jobs:
         else
           echo "Karpenter node role already exists, skipping..."
         fi
-    
+
     - name: Deploy Karpenter
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
