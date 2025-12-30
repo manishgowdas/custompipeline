@@ -226,12 +226,6 @@ jobs:
         # Delete existing PVC to avoid storage class conflicts
         kubectl delete pvc prometheus-server -n monitoring --ignore-not-found=true
         
-        # Wait for ALB controller webhook if it exists
-        if kubectl get deployment aws-load-balancer-controller -n kube-system >/dev/null 2>&1; then
-          echo "Waiting for ALB controller webhook to be ready..."
-          kubectl wait --for=condition=available --timeout=300s deployment/aws-load-balancer-controller -n kube-system
-        fi
-
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo update
         helm upgrade --install prometheus prometheus-community/prometheus \
