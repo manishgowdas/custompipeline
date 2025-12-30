@@ -26,9 +26,6 @@ alertmanager:
 # Prometheus server
 server:
   enabled: true
-  service:
-    type: LoadBalancer
-    port: 80
   persistentVolume:
     enabled: true
     size: 10Gi
