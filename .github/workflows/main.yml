@@ -1,374 +1,379 @@
-name: Deploy EKS Addons
+	name: Deploy EKS Addons
 
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        default: "dev"
-        type: choice
-        options:
-          - dev
-          - stage
-          - prod
-      cluster_name:
-        description: "EKS Cluster Name"
-        required: true
-        type: choice
-        options:
-          - eks-dev-cluster
-          - eks-stage-cluster
-          - eks-prod-cluster
-      region:
-        description: "AWS Region"
-        required: true
-        default: "ap-south-1"
-        type: choice
-        options:
-          - us-east-1
-          - us-west-2
-          - ap-south-1
-          - ap-northeast-2
-          - eu-west-1
-      addon:
-        description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana, karpenter)"
-        required: true
-        default: "alb"
-        type: choice
-        options:
-          - alb
-          - metric-server
-          - argocd
-          - prometheus
-          - grafana
-          - karpenter
-      vpc_id:
-        description: "VPC ID (required only for ALB controller)"
-        required: false
-        type: string
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write       # Required for OIDC
-      contents: read
-
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-
-    # --- Set environment variables ---
-    - name: Set environment variables
-      run: |
-        echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
-        echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
-        echo "AWS_REGION=${{ github.event.inputs.region }}" >> $GITHUB_ENV
-        echo "CLUSTER_NAME=${{ github.event.inputs.cluster_name }}" >> $GITHUB_ENV
-        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
-    # Debug output (safe)
-    - name: Debug info
-      run: |
-        echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
-        echo "ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
-        echo "Region=$AWS_REGION"
-        echo "Cluster=$CLUSTER_NAME"
-    - name: Configure AWS credentials via OIDC
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ env.ROLE_TO_ASSUME }}
-        aws-region: ${{ env.AWS_REGION }}
-        audience: sts.amazonaws.com
-
-    - name: Setup kubectl
-      uses: azure/setup-kubectl@v3
-
-    - name: Setup helm
-      uses: azure/setup-helm@v3
-
-    - name: Update kubeconfig for EKS
-      run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+	on:
+	  workflow_dispatch:
+		inputs:
+		  environment:
+			description: "Target environment"
+			required: true
+			default: "dev"
+			type: choice
+			options:
+			  - dev
+			  - stage
+			  - prod
+		  cluster_name:
+			description: "EKS Cluster Name"
+			required: true
+			type: choice
+			options:
+			  - eks-dev-cluster
+			  - eks-stage-cluster
+			  - eks-prod-cluster
+		  region:
+			description: "AWS Region"
+			required: true
+			default: "ap-south-1"
+			type: choice
+			options:
+			  - us-east-1
+			  - us-west-2
+			  - ap-south-1
+			  - ap-northeast-2
+			  - eu-west-1
+		  addon:
+			description: "Addon to deploy (alb, metric-server, argocd, prometheus, grafana, karpenter)"
+			required: true
+			default: "alb"
+			type: choice
+			options:
+			  - alb
+			  - metric-server
+			  - argocd
+			  - prometheus
+			  - grafana
+			  - karpenter
 
 
-    # --- Metrics Server ---
-    - name: Deploy Metrics Server
-      if: ${{ github.event.inputs.addon == 'metric-server' }}
-      run: |
-        # Remove existing EKS-managed metrics-server resources
-        kubectl delete deployment metrics-server -n kube-system --ignore-not-found=true
-        kubectl delete service metrics-server -n kube-system --ignore-not-found=true
-        kubectl delete rolebinding metrics-server-auth-reader -n kube-system --ignore-not-found=true
-        kubectl delete clusterrolebinding metrics-server:system:auth-delegator --ignore-not-found=true
-        kubectl delete clusterrolebinding system:metrics-server --ignore-not-found=true
-        kubectl delete clusterrole system:metrics-server --ignore-not-found=true
-        kubectl delete clusterrole system:metrics-server-aggregated-reader --ignore-not-found=true
-        kubectl delete serviceaccount metrics-server -n kube-system --ignore-not-found=true
-        kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found=true
+	jobs:
+	  deploy:
+		runs-on: ubuntu-latest
+		permissions:
+		  id-token: write       # Required for OIDC
+		  contents: read
 
-        # Install with Helm
-        helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
-        helm repo update
-        helm upgrade --install metrics-server metrics-server/metrics-server \
-          --namespace kube-system --create-namespace
-    # --- AWS Load Balancer Controller ---
-    - name: Ensure IAM Policy
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
-        if aws iam create-policy \
-            --policy-name $ENVIRONMENT-alb-controller-policy \
-            --policy-document file://iam_policy.json >/dev/null 2>&1; then
-          echo "Policy created successfully"
-        else
-          echo "Policy already exists, skipping..."
-        fi
-    - name: Ensure IAM Role
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
-          --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
-        cat > trust.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
-              },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "${OIDC_PROVIDER}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
-                }
-              }
-            }
-          ]
-        }
-        EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-alb-controller-role \
-            --assume-role-policy-document file://trust.json >/dev/null 2>&1; then
-          echo "Role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-alb-controller-role \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy
-        else
-          echo "Role already exists, skipping..."
-        fi
-    - name: Ensure Service Account
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        kubectl get sa aws-load-balancer-controller -n kube-system >/dev/null 2>&1 || \
-          kubectl create serviceaccount aws-load-balancer-controller -n kube-system
-        kubectl annotate serviceaccount aws-load-balancer-controller \
-          -n kube-system \
-          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-alb-controller-role --overwrite
-    - name: Validate VPC ID for ALB
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        if [ -z "${{ github.event.inputs.vpc_id }}" ]; then
-          echo "Error: VPC ID is required for ALB controller deployment"
-          exit 1
-        fi
+		steps:
+		- name: Checkout repo
+		  uses: actions/checkout@v4
 
-    - name: Install ALB Controller CRDs
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml
+		# --- Set environment variables ---
+		- name: Set environment variables
+		  run: |
+			echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
+			echo "ROLE_TO_ASSUME=arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsEKSRole" >> $GITHUB_ENV
+			echo "AWS_REGION=${{ github.event.inputs.region }}" >> $GITHUB_ENV
+			echo "CLUSTER_NAME=${{ github.event.inputs.cluster_name }}" >> $GITHUB_ENV
+			echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+			# Set VPC ID based on environment
+			if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+			  echo "VPC_ID=${{ secrets.DEV_VPC_ID }}" >> $GITHUB_ENV
+			elif [ "${{ github.event.inputs.environment }}" = "stage" ]; then
+			  echo "VPC_ID=${{ secrets.STAGE_VPC_ID }}" >> $GITHUB_ENV
+			elif [ "${{ github.event.inputs.environment }}" = "prod" ]; then
+			  echo "VPC_ID=${{ secrets.PROD_VPC_ID }}" >> $GITHUB_ENV
+			fi
+		# Debug output (safe)
+		- name: Debug info
+		  run: |
+			echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
+			echo "ROLE_TO_ASSUME=$ROLE_TO_ASSUME"
+			echo "Region=$AWS_REGION"
+			echo "Cluster=$CLUSTER_NAME"
+		- name: Configure AWS credentials via OIDC
+		  uses: aws-actions/configure-aws-credentials@v4
+		  with:
+			role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+			aws-region: ${{ env.AWS_REGION }}
+			audience: sts.amazonaws.com
 
-    - name: Deploy AWS Load Balancer Controller
-      if: ${{ github.event.inputs.addon == 'alb' }}
-      run: |
-        helm repo add eks https://aws.github.io/eks-charts
-        helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-          --namespace kube-system --create-namespace \
-          --set clusterName=$CLUSTER_NAME \
-          --set serviceAccount.create=false \
-          --set serviceAccount.name=aws-load-balancer-controller \
-          --set vpcId="${{ github.event.inputs.vpc_id }}"
-    # --- ArgoCD ---
-    - name: Deploy ArgoCD
-      if: ${{ github.event.inputs.addon == 'argocd' }}
-      run: |
-        # Remove existing ArgoCD resources
-        kubectl delete namespace argocd --ignore-not-found=true
-        kubectl delete crd applications.argoproj.io --ignore-not-found=true
-        kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true
-        kubectl delete crd appprojects.argoproj.io --ignore-not-found=true
-        kubectl delete clusterrole argocd-application-controller --ignore-not-found=true
-        kubectl delete clusterrole argocd-server --ignore-not-found=true
-        kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true
-        kubectl delete clusterrolebinding argocd-server --ignore-not-found=true
+		- name: Setup kubectl
+		  uses: azure/setup-kubectl@v3
 
-        helm repo add argo https://argoproj.github.io/argo-helm
-        helm repo update
-        helm upgrade --install argocd argo/argo-cd \
-          --namespace argocd --create-namespace
-    # --- Prometheus ---
-    - name: Deploy Prometheus
-      if: ${{ github.event.inputs.addon == 'prometheus' }}
-      run: |
-        # Delete existing PVC to avoid storage class conflicts
-        kubectl delete pvc prometheus-server -n monitoring --ignore-not-found=true
+		- name: Setup helm
+		  uses: azure/setup-helm@v3
 
-        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-        helm repo update
-        helm upgrade --install prometheus prometheus-community/prometheus \
-          --namespace monitoring --create-namespace \
-          --set server.persistentVolume.enabled=true \
-          --set server.persistentVolume.size=10Gi
-    # --- Grafana ---
-    - name: Deploy Grafana
-      if: ${{ github.event.inputs.addon == 'grafana' }}
-      run: |
-        helm repo add grafana https://grafana.github.io/helm-charts
-        helm repo update
-        helm upgrade --install grafana grafana/grafana \
-          --namespace monitoring --create-namespace 
+		- name: Update kubeconfig for EKS
+		  run: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
 
-    # --- Karpenter ---
-    - name: Create Karpenter IAM Policy
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
-        cat > karpenter-policy.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Action": [
-                "ssm:GetParameter",
-                "iam:PassRole",
-                "ec2:DescribeImages",
-                "ec2:RunInstances",
-                "ec2:DescribeSubnets",
-                "ec2:DescribeSecurityGroups",
-                "ec2:DescribeLaunchTemplates",
-                "ec2:DescribeInstances",
-                "ec2:DescribeInstanceTypes",
-                "ec2:DescribeInstanceTypeOfferings",
-                "ec2:DescribeAvailabilityZones",
-                "ec2:DeleteLaunchTemplate",
-                "ec2:CreateTags",
-                "ec2:CreateLaunchTemplate",
-                "ec2:CreateFleet",
-                "ec2:DescribeSpotPriceHistory",
-                "pricing:GetProducts"
-              ],
-              "Resource": "*"
-            },
-            {
-              "Effect": "Allow",
-              "Action": "ec2:TerminateInstances",
-              "Resource": "*",
-              "Condition": {
-                "StringLike": {
-                  "ec2:ResourceTag/karpenter.sh/cluster": "*"
-                }
-              }
-            }
-          ]
-        }
-        EOF
-        if aws iam create-policy \
-            --policy-name $ENVIRONMENT-karpenter-controller-policy \
-            --policy-document file://karpenter-policy.json >/dev/null 2>&1; then
-          echo "Karpenter policy created successfully"
-        else
-          echo "Karpenter policy already exists, skipping..."
-        fi
 
-    - name: Create Karpenter Controller IAM Role
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
-        OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
-          --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
-        cat > karpenter-trust.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
-              },
-              "Action": "sts:AssumeRoleWithWebIdentity",
-              "Condition": {
-                "StringEquals": {
-                  "${OIDC_PROVIDER}:sub": "system:serviceaccount:karpenter:karpenter",
-                  "${OIDC_PROVIDER}:aud": "sts.amazonaws.com"
-                }
-              }
-            }
-          ]
-        }
-        EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-karpenter-controller-role \
-            --assume-role-policy-document file://karpenter-trust.json >/dev/null 2>&1; then
-          echo "Karpenter controller role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-controller-role \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy
-        else
-          echo "Karpenter controller role already exists, skipping..."
-        fi
+		# --- Metrics Server ---
+		- name: Deploy Metrics Server
+		  if: ${{ github.event.inputs.addon == 'metric-server' }}
+		  run: |
+			# Remove existing EKS-managed metrics-server resources
+			kubectl delete deployment metrics-server -n kube-system --ignore-not-found=true
+			kubectl delete service metrics-server -n kube-system --ignore-not-found=true
+			kubectl delete rolebinding metrics-server-auth-reader -n kube-system --ignore-not-found=true
+			kubectl delete clusterrolebinding metrics-server:system:auth-delegator --ignore-not-found=true
+			kubectl delete clusterrolebinding system:metrics-server --ignore-not-found=true
+			kubectl delete clusterrole system:metrics-server --ignore-not-found=true
+			kubectl delete clusterrole system:metrics-server-aggregated-reader --ignore-not-found=true
+			kubectl delete serviceaccount metrics-server -n kube-system --ignore-not-found=true
+			kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found=true
 
-    - name: Create Karpenter Node IAM Role
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
-        cat > karpenter-node-trust.json <<EOF
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "ec2.amazonaws.com"
-              },
-              "Action": "sts:AssumeRole"
-            }
-          ]
-        }
-        EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --assume-role-policy-document file://karpenter-node-trust.json >/dev/null 2>&1; then
-          echo "Karpenter node role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        else
-          echo "Karpenter node role already exists, skipping..."
-        fi
+			# Install with Helm
+			helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+			helm repo update
+			helm upgrade --install metrics-server metrics-server/metrics-server \
+			  --namespace kube-system --create-namespace
+		# --- AWS Load Balancer Controller ---
+		- name: Ensure IAM Policy
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+			if aws iam create-policy \
+				--policy-name $ENVIRONMENT-alb-controller-policy \
+				--policy-document file://iam_policy.json >/dev/null 2>&1; then
+			  echo "Policy created successfully"
+			else
+			  echo "Policy already exists, skipping..."
+			fi
+		- name: Ensure IAM Role
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
+			  --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
+			cat > trust.json <<EOF
+			{
+			  "Version": "2012-10-17",
+			  "Statement": [
+				{
+				  "Effect": "Allow",
+				  "Principal": {
+					"Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
+				  },
+				  "Action": "sts:AssumeRoleWithWebIdentity",
+				  "Condition": {
+					"StringEquals": {
+					  "${OIDC_PROVIDER}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+					}
+				  }
+				}
+			  ]
+			}
+			EOF
+			if aws iam create-role \
+				--role-name $ENVIRONMENT-alb-controller-role \
+				--assume-role-policy-document file://trust.json >/dev/null 2>&1; then
+			  echo "Role created successfully"
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-alb-controller-role \
+				--policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy
+			else
+			  echo "Role already exists, skipping..."
+			fi
+		- name: Ensure Service Account
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			kubectl get sa aws-load-balancer-controller -n kube-system >/dev/null 2>&1 || \
+			  kubectl create serviceaccount aws-load-balancer-controller -n kube-system
+			kubectl annotate serviceaccount aws-load-balancer-controller \
+			  -n kube-system \
+			  eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-alb-controller-role --overwrite
+		- name: Validate VPC ID for ALB
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			if [ -z "$VPC_ID" ]; then
+			  echo "Error: VPC ID is required for ALB controller deployment"
+			  echo "Please ensure ${{ github.event.inputs.environment }}_VPC_ID secret is set"
+			  exit 1
+			fi
 
-    - name: Deploy Karpenter
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
-        helm repo add karpenter https://charts.karpenter.sh/
-        helm repo update
-        kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
-        kubectl annotate serviceaccount karpenter \
-          -n karpenter \
-          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
-        helm upgrade --install karpenter karpenter/karpenter \
-          --create-namespace \
-          --namespace karpenter \
-          --set serviceAccount.create=false \
-          --set serviceAccount.name=karpenter \
-          --set clusterName=$CLUSTER_NAME \
-          --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
-          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
+		- name: Install ALB Controller CRDs
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_ingressclassparams.yaml
+			kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml --dry-run=server || kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.6.2/config/crd/bases/elbv2.k8s.aws_targetgroupbindings.yaml
+
+		- name: Deploy AWS Load Balancer Controller
+		  if: ${{ github.event.inputs.addon == 'alb' }}
+		  run: |
+			helm repo add eks https://aws.github.io/eks-charts
+			helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+			  --namespace kube-system --create-namespace \
+			  --set clusterName=$CLUSTER_NAME \
+			  --set serviceAccount.create=false \
+			  --set serviceAccount.name=aws-load-balancer-controller \
+			  --set vpcId="$VPC_ID"
+		# --- ArgoCD ---
+		- name: Deploy ArgoCD
+		  if: ${{ github.event.inputs.addon == 'argocd' }}
+		  run: |
+			# Remove existing ArgoCD resources
+			kubectl delete namespace argocd --ignore-not-found=true
+			kubectl delete crd applications.argoproj.io --ignore-not-found=true
+			kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true
+			kubectl delete crd appprojects.argoproj.io --ignore-not-found=true
+			kubectl delete clusterrole argocd-application-controller --ignore-not-found=true
+			kubectl delete clusterrole argocd-server --ignore-not-found=true
+			kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true
+			kubectl delete clusterrolebinding argocd-server --ignore-not-found=true
+
+			helm repo add argo https://argoproj.github.io/argo-helm
+			helm repo update
+			helm upgrade --install argocd argo/argo-cd \
+			  --namespace argocd --create-namespace
+		# --- Prometheus ---
+		- name: Deploy Prometheus
+		  if: ${{ github.event.inputs.addon == 'prometheus' }}
+		  run: |
+			# Delete existing PVC to avoid storage class conflicts
+			kubectl delete pvc prometheus-server -n monitoring --ignore-not-found=true
+
+			helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+			helm repo update
+			helm upgrade --install prometheus prometheus-community/prometheus \
+			  --namespace monitoring --create-namespace \
+			  --values charts/prometheus-$ENVIRONMENT-values.yaml
+		# --- Grafana ---
+		- name: Deploy Grafana
+		  if: ${{ github.event.inputs.addon == 'grafana' }}
+		  run: |
+			helm repo add grafana https://grafana.github.io/helm-charts
+			helm repo update
+			helm upgrade --install grafana grafana/grafana \
+			  --namespace monitoring --create-namespace 
+
+		# --- Karpenter ---
+		- name: Create Karpenter IAM Policy
+		  if: ${{ github.event.inputs.addon == 'karpenter' }}
+		  run: |
+			cat > karpenter-policy.json <<EOF
+			{
+			  "Version": "2012-10-17",
+			  "Statement": [
+				{
+				  "Effect": "Allow",
+				  "Action": [
+					"ssm:GetParameter",
+					"iam:PassRole",
+					"ec2:DescribeImages",
+					"ec2:RunInstances",
+					"ec2:DescribeSubnets",
+					"ec2:DescribeSecurityGroups",
+					"ec2:DescribeLaunchTemplates",
+					"ec2:DescribeInstances",
+					"ec2:DescribeInstanceTypes",
+					"ec2:DescribeInstanceTypeOfferings",
+					"ec2:DescribeAvailabilityZones",
+					"ec2:DeleteLaunchTemplate",
+					"ec2:CreateTags",
+					"ec2:CreateLaunchTemplate",
+					"ec2:CreateFleet",
+					"ec2:DescribeSpotPriceHistory",
+					"pricing:GetProducts"
+				  ],
+				  "Resource": "*"
+				},
+				{
+				  "Effect": "Allow",
+				  "Action": "ec2:TerminateInstances",
+				  "Resource": "*",
+				  "Condition": {
+					"StringLike": {
+					  "ec2:ResourceTag/karpenter.sh/cluster": "*"
+					}
+				  }
+				}
+			  ]
+			}
+			EOF
+			if aws iam create-policy \
+				--policy-name $ENVIRONMENT-karpenter-controller-policy \
+				--policy-document file://karpenter-policy.json >/dev/null 2>&1; then
+			  echo "Karpenter policy created successfully"
+			else
+			  echo "Karpenter policy already exists, skipping..."
+			fi
+
+		- name: Create Karpenter Controller IAM Role
+		  if: ${{ github.event.inputs.addon == 'karpenter' }}
+		  run: |
+			OIDC_PROVIDER=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION \
+			  --query "cluster.identity.oidc.issuer" --output text | sed -e "s/^https:\/\///")
+			cat > karpenter-trust.json <<EOF
+			{
+			  "Version": "2012-10-17",
+			  "Statement": [
+				{
+				  "Effect": "Allow",
+				  "Principal": {
+					"Federated": "arn:aws:iam::$AWS_ACCOUNT_ID:oidc-provider/${OIDC_PROVIDER}"
+				  },
+				  "Action": "sts:AssumeRoleWithWebIdentity",
+				  "Condition": {
+					"StringEquals": {
+					  "${OIDC_PROVIDER}:sub": "system:serviceaccount:karpenter:karpenter",
+					  "${OIDC_PROVIDER}:aud": "sts.amazonaws.com"
+					}
+				  }
+				}
+			  ]
+			}
+			EOF
+			if aws iam create-role \
+				--role-name $ENVIRONMENT-karpenter-controller-role \
+				--assume-role-policy-document file://karpenter-trust.json >/dev/null 2>&1; then
+			  echo "Karpenter controller role created successfully"
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-karpenter-controller-role \
+				--policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy
+			else
+			  echo "Karpenter controller role already exists, skipping..."
+			fi
+
+		- name: Create Karpenter Node IAM Role
+		  if: ${{ github.event.inputs.addon == 'karpenter' }}
+		  run: |
+			cat > karpenter-node-trust.json <<EOF
+			{
+			  "Version": "2012-10-17",
+			  "Statement": [
+				{
+				  "Effect": "Allow",
+				  "Principal": {
+					"Service": "ec2.amazonaws.com"
+				  },
+				  "Action": "sts:AssumeRole"
+				}
+			  ]
+			}
+			EOF
+			if aws iam create-role \
+				--role-name $ENVIRONMENT-karpenter-node-role \
+				--assume-role-policy-document file://karpenter-node-trust.json >/dev/null 2>&1; then
+			  echo "Karpenter node role created successfully"
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-karpenter-node-role \
+				--policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-karpenter-node-role \
+				--policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-karpenter-node-role \
+				--policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+			  aws iam attach-role-policy \
+				--role-name $ENVIRONMENT-karpenter-node-role \
+				--policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+			else
+			  echo "Karpenter node role already exists, skipping..."
+			fi
+
+		- name: Deploy Karpenter
+		  if: ${{ github.event.inputs.addon == 'karpenter' }}
+		  run: |
+			helm repo add karpenter https://charts.karpenter.sh/
+			helm repo update
+			kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
+			kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
+			kubectl annotate serviceaccount karpenter \
+			  -n karpenter \
+			  eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
+			helm upgrade --install karpenter karpenter/karpenter \
+			  --create-namespace \
+			  --namespace karpenter \
+			  --set serviceAccount.create=false \
+			  --set serviceAccount.name=karpenter \
+			  --set clusterName=$CLUSTER_NAME \
+			  --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
+			  --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
