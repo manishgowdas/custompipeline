@@ -226,6 +226,10 @@ jobs:
         # Delete existing PVC to avoid storage class conflicts
         kubectl delete pvc prometheus-server -n monitoring --ignore-not-found=true
         
+        # Temporarily disable ALB webhook if it's causing issues
+        kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found=true
+        kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found=true
+        
         helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
         helm repo update
         helm upgrade --install prometheus prometheus-community/prometheus \
