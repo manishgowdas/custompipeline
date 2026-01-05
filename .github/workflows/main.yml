@@ -244,6 +244,7 @@ jobs:
         helm repo update
         helm upgrade --install grafana grafana/grafana \
           --namespace monitoring --create-namespace
+          --values charts/grafana-$ENVIRONMENT-values.yaml
 
     # --- Karpenter ---
     - name: Create Karpenter IAM Policy
