@@ -16,11 +16,11 @@ ingress:
   annotations:
     kubernetes.io/ingress.class: alb
   hosts:
-    - host: grafana-dev.example.com
-      paths:
-        - path: /
-          pathType: Prefix
+    - grafana-dev.example.com
+  path: /
+  pathType: Prefix
   tls: []
+
 
 adminUser: admin
 adminPassword: devStrongPassword123
