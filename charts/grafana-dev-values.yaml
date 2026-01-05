@@ -1,0 +1,40 @@
+# Grafana Helm values for DEV environment
+
+replicaCount: 1
+
+image:
+  repository: grafana/grafana
+  tag: 11.0.0
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: alb
+  hosts:
+    - host: grafana-dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+adminUser: admin
+adminPassword: devStrongPassword123
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
