@@ -17,7 +17,7 @@ on:
         required: true
         type: choice
         options:
-          - eks-dev-cluster
+          - sharadha-prod-us-cluster
           - eks-stage-cluster
           - eks-prod-cluster
       region:
