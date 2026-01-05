@@ -43,6 +43,7 @@ on:
           - prometheus
           - grafana
           - karpenter
+          - doppler
 
 jobs:
   deploy:
@@ -390,3 +391,13 @@ jobs:
           --set clusterName=$CLUSTER_NAME \
           --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
           --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
+
+        # --- Doppler ---
+    - name: Deploy Doppler
+      if: ${{ github.event.inputs.addon == 'doppler' }}
+      run: |
+        helm repo add doppler https://helm.doppler.com
+        helm repo update
+        helm upgrade --install doppler-operator doppler/doppler-kubernetes-operator \
+          --namespace doppler --create-namespace \
+          --values charts/doppler-$ENVIRONMENT-values.yaml
