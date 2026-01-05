@@ -1,0 +1,52 @@
+# ArgoCD Helm values for DEV environment
+
+# Override release name
+nameOverride: argocd
+
+# Number of replicas for each component
+controller:
+  replicas: 1
+
+server:
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: alb
+    hosts:
+      - argocd-dev.example.com
+    tls: []
+  extraArgs:
+    - --insecure
+  config:
+    url: https://argocd-dev.example.com
+
+repoServer:
+  replicas: 1
+
+applicationSet:
+  replicas: 1
+
+dex:
+  enabled: true
+
+redis:
+  enabled: true
+
+# Resource requests/limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
+
+# Admin credentials
+configs:
+  secret:
+    # bcrypt hash of your chosen admin password
+    argocdServerAdminPassword: "$2a$12$abcdefghijklmno..."
