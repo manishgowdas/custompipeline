@@ -1,0 +1,29 @@
+# Doppler Operator Helm values for DEV environment
+
+replicaCount: 1
+
+image:
+  repository: dopplerhq/doppler-kubernetes-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: doppler-operator
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Doppler project/environment binding
+dopplerToken: "${DOPPLER_SERVICE_TOKEN}"  
+
+# Optional: namespace scoping
+operator:
+  watchNamespaces:
+    - default
+    - monitoring
