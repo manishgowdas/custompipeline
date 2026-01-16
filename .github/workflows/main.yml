@@ -10,16 +10,16 @@ on:
         type: choice
         options:
           - dev
-          - stage
+          - stg
           - prod
       cluster_name:
         description: "EKS Cluster Name"
         required: true
         type: choice
         options:
-          - sharadha-prod-us-cluster
-          - eks-stage-cluster
-          - eks-prod-cluster
+          - eks-dev-cluster
+          - stg-eks-cluster
+          - prod-eks-cluster
       region:
         description: "AWS Region"
         required: true
@@ -126,12 +126,13 @@ jobs:
       if: ${{ github.event.inputs.addon == 'alb' }}
       run: |
         curl -o iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
-        if aws iam create-policy \
-            --policy-name $ENVIRONMENT-alb-controller-policy \
-            --policy-document file://iam_policy.json >/dev/null 2>&1; then
-          echo "Policy created successfully"
-        else
+        if aws iam get-policy --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy >/dev/null 2>&1; then
           echo "Policy already exists, skipping..."
+        else
+          aws iam create-policy \
+            --policy-name $ENVIRONMENT-alb-controller-policy \
+            --policy-document file://iam_policy.json
+          echo "Policy created successfully"
         fi
 
     - name: Ensure IAM Role
@@ -158,16 +159,17 @@ jobs:
           ]
         }
         EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-alb-controller-role \
-            --assume-role-policy-document file://trust.json >/dev/null 2>&1; then
-          echo "Role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-alb-controller-role \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy
-        else
+        if aws iam get-role --role-name $ENVIRONMENT-alb-controller-role >/dev/null 2>&1; then
           echo "Role already exists, skipping..."
+        else
+          aws iam create-role \
+            --role-name $ENVIRONMENT-alb-controller-role \
+            --assume-role-policy-document file://trust.json
+          echo "Role created successfully"
         fi
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-alb-controller-role \
+          --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-alb-controller-policy || true
 
     - name: Ensure Service Account
       if: ${{ github.event.inputs.addon == 'alb' }}
@@ -295,12 +297,13 @@ jobs:
           ]
         }
         EOF
-        if aws iam create-policy \
-            --policy-name $ENVIRONMENT-karpenter-controller-policy \
-            --policy-document file://karpenter-policy.json >/dev/null 2>&1; then
-          echo "Karpenter policy created successfully"
-        else
+        if aws iam get-policy --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy >/dev/null 2>&1; then
           echo "Karpenter policy already exists, skipping..."
+        else
+          aws iam create-policy \
+            --policy-name $ENVIRONMENT-karpenter-controller-policy \
+            --policy-document file://karpenter-policy.json
+          echo "Karpenter policy created successfully"
         fi
 
     - name: Create Karpenter Controller IAM Role
@@ -328,16 +331,17 @@ jobs:
           ]
         }
         EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-karpenter-controller-role \
-            --assume-role-policy-document file://karpenter-trust.json >/dev/null 2>&1; then
-          echo "Karpenter controller role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-controller-role \
-            --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy
-        else
+        if aws iam get-role --role-name $ENVIRONMENT-karpenter-controller-role >/dev/null 2>&1; then
           echo "Karpenter controller role already exists, skipping..."
+        else
+          aws iam create-role \
+            --role-name $ENVIRONMENT-karpenter-controller-role \
+            --assume-role-policy-document file://karpenter-trust.json
+          echo "Karpenter controller role created successfully"
         fi
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-karpenter-controller-role \
+          --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy || true
 
     - name: Create Karpenter Node IAM Role
       if: ${{ github.event.inputs.addon == 'karpenter' }}
@@ -356,25 +360,26 @@ jobs:
           ]
         }
         EOF
-        if aws iam create-role \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --assume-role-policy-document file://karpenter-node-trust.json >/dev/null 2>&1; then
-          echo "Karpenter node role created successfully"
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-          aws iam attach-role-policy \
-            --role-name $ENVIRONMENT-karpenter-node-role \
-            --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        else
+        if aws iam get-role --role-name $ENVIRONMENT-karpenter-node-role >/dev/null 2>&1; then
           echo "Karpenter node role already exists, skipping..."
+        else
+          aws iam create-role \
+            --role-name $ENVIRONMENT-karpenter-node-role \
+            --assume-role-policy-document file://karpenter-node-trust.json
+          echo "Karpenter node role created successfully"
         fi
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-karpenter-node-role \
+          --policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy || true
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-karpenter-node-role \
+          --policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy || true
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-karpenter-node-role \
+          --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly || true
+        aws iam attach-role-policy \
+          --role-name $ENVIRONMENT-karpenter-node-role \
+          --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || true
 
     - name: Deploy Karpenter
       if: ${{ github.event.inputs.addon == 'karpenter' }}
