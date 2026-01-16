@@ -44,6 +44,7 @@ on:
           - grafana
           - karpenter
           - doppler
+          - gp3-storageclass
 
 jobs:
   deploy:
@@ -68,13 +69,10 @@ jobs:
         
         if [ "${{ github.event.inputs.environment }}" = "dev" ]; then 
           echo "VPC_ID=${{ secrets.DEV_VPC_ID }}" >> $GITHUB_ENV 
-          echo "DOPPLER_SERVICE_TOKEN=${{ secrets.DOPPLER_SERVICE_TOKEN_DEV }}" >> $GITHUB_ENV 
         elif [ "${{ github.event.inputs.environment }}" = "stage" ]; then 
           echo "VPC_ID=${{ secrets.STAGE_VPC_ID }}" >> $GITHUB_ENV 
-          echo "DOPPLER_SERVICE_TOKEN=${{ secrets.DOPPLER_SERVICE_TOKEN_STAGE }}" >> $GITHUB_ENV 
         elif [ "${{ github.event.inputs.environment }}" = "prod" ]; then 
           echo "VPC_ID=${{ secrets.PROD_VPC_ID }}" >> $GITHUB_ENV 
-          echo "DOPPLER_SERVICE_TOKEN=${{ secrets.DOPPLER_SERVICE_TOKEN_PROD }}" >> $GITHUB_ENV 
         fi
     # Debug output (safe)
     - name: Debug info
@@ -409,3 +407,21 @@ jobs:
         helm upgrade --install doppler-operator doppler/doppler-kubernetes-operator \
           --namespace doppler --create-namespace \
           --values charts/doppler-$ENVIRONMENT-values.yaml
+
+     # --- gp3 StorageClass ---
+    - name: Deploy gp3 StorageClass
+      if: ${{ github.event.inputs.addon == 'gp3-storageclass' }}
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: gp3
+        provisioner: ebs.csi.aws.com
+        parameters:
+          type: gp3
+          fsType: ext4
+        reclaimPolicy: Retain
+        volumeBindingMode: WaitForFirstConsumer
+        allowVolumeExpansion: true
+        EOF
