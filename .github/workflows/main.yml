@@ -445,7 +445,6 @@ jobs:
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
         helm pull oci://public.ecr.aws/karpenter/karpenter --version 1.8.5 --untar
-        tar -xvf karpenter-1.8.5.tgz
         kubectl apply -f karpenter/crds/
         kubectl create serviceaccount karpenter -n kube-system --dry-run=client -o yaml | kubectl apply -f -
         kubectl annotate serviceaccount karpenter \
