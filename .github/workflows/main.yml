@@ -258,9 +258,6 @@ jobs:
     - name: Create Karpenter IAM Policy
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
-    - name: Create Karpenter IAM Policy
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
         cat > karpenter-policy.json <<EOF
         {
           "Version": "2012-10-17",
@@ -370,7 +367,8 @@ jobs:
         fi
         aws iam attach-role-policy \
           --role-name $ENVIRONMENT-karpenter-controller-role \
-          --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy || true
+          --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$ENVIRONMENT-karpenter-controller-policy
+        echo "Karpenter controller policy attached successfully"
 
     - name: Create Karpenter Node IAM Role
       if: ${{ github.event.inputs.addon == 'karpenter' }}
