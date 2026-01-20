@@ -457,9 +457,9 @@ jobs:
           --namespace kube-system \
           --set serviceAccount.create=false \
           --set serviceAccount.name=karpenter \
-          --set clusterName=$CLUSTER_NAME \
-          --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
-          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-instance-profile
+          --set settings.clusterName=$CLUSTER_NAME \
+          --set settings.clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
+          --set settings.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-instance-profile
 
     # --- Doppler ---
     - name: Deploy Doppler
