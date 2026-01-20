@@ -324,7 +324,7 @@ jobs:
               "Action": "sts:AssumeRoleWithWebIdentity",
               "Condition": {
                 "StringEquals": {
-                  "${OIDC_PROVIDER}:sub": "system:serviceaccount:karpenter:karpenter",
+                  "${OIDC_PROVIDER}:sub": "system:serviceaccount:kube-system:karpenter",
                   "${OIDC_PROVIDER}:aud": "sts.amazonaws.com"
                 }
               }
@@ -387,14 +387,12 @@ jobs:
       run: |
         helm repo add karpenter https://charts.karpenter.sh/
         helm repo update
-        kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create serviceaccount karpenter -n kube-system --dry-run=client -o yaml | kubectl apply -f -
         kubectl annotate serviceaccount karpenter \
-          -n karpenter \
+          -n kube-system \
           eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
         helm upgrade --install karpenter karpenter/karpenter \
-          --create-namespace \
-          --namespace karpenter \
+          --namespace kube-system \
           --set serviceAccount.create=false \
           --set serviceAccount.name=karpenter \
           --set clusterName=$CLUSTER_NAME \
