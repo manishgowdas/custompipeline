@@ -382,21 +382,19 @@ jobs:
     - name: Deploy Karpenter
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
-        helm repo add karpenter https://charts.karpenter.sh/
-        helm repo update
-        kubectl create namespace karpenter --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create serviceaccount karpenter -n karpenter --dry-run=client -o yaml | kubectl apply -f -
-        kubectl annotate serviceaccount karpenter \
-          -n karpenter \
-          eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
-        helm upgrade --install karpenter karpenter/karpenter \
+        helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+          --version "1.8.5" \
+          --namespace kube-system \
           --create-namespace \
-          --namespace karpenter \
-          --set serviceAccount.create=false \
-          --set serviceAccount.name=karpenter \
-          --set clusterName=$CLUSTER_NAME \
-          --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
-          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
+          --set "settings.clusterName=$CLUSTER_NAME" \
+          --set "settings.interruptionQueue=$CLUSTER_NAME" \
+          --set controller.resources.requests.cpu=1 \
+          --set controller.resources.requests.memory=1Gi \
+          --set controller.resources.limits.cpu=1 \
+          --set controller.resources.limits.memory=1Gi \
+          --set settings.interruptionQueue="" \
+          --wait
+
 
         # --- Doppler ---
     - name: Deploy Doppler
