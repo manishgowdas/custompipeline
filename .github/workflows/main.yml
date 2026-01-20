@@ -410,6 +410,24 @@ jobs:
           --role-name $ENVIRONMENT-karpenter-node-role \
           --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || true
 
+    - name: Update aws-auth ConfigMap for Karpenter
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        kubectl get configmap aws-auth -n kube-system -o yaml > aws-auth.yaml
+        if ! grep -q "$ENVIRONMENT-karpenter-node-role" aws-auth.yaml; then
+          cat >> karpenter-auth.yaml <<EOF
+        - rolearn: arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-node-role
+          username: system:node:{{EC2PrivateDNSName}}
+          groups:
+          - system:bootstrappers
+          - system:nodes
+        EOF
+          kubectl patch configmap aws-auth -n kube-system --type merge -p '{"data":{"mapRoles":"'$(kubectl get configmap aws-auth -n kube-system -o jsonpath='{.data.mapRoles}')$(cat karpenter-auth.yaml)'"}}'
+          echo "Added Karpenter node role to aws-auth ConfigMap"
+        else
+          echo "Karpenter node role already exists in aws-auth ConfigMap"
+        fi
+
     - name: Create Karpenter Node Instance Profile
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
