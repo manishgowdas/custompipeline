@@ -446,6 +446,8 @@ jobs:
       run: |
         helm pull oci://public.ecr.aws/karpenter/karpenter --version 1.8.5 --untar
         kubectl apply -f karpenter/crds/
+        echo "Installed Karpenter CRDs:"
+        kubectl get crd | grep karpenter
         kubectl create serviceaccount karpenter -n kube-system --dry-run=client -o yaml | kubectl apply -f -
         kubectl annotate serviceaccount karpenter \
           -n kube-system \
