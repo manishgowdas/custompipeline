@@ -432,14 +432,14 @@ jobs:
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
         if aws iam get-instance-profile --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile >/dev/null 2>&1; then
-          echo "Instance profile already exists, skipping..."
+          echo "Instance profile already exists, checking role attachment..."
         else
           aws iam create-instance-profile --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile
-          aws iam add-role-to-instance-profile \
-            --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile \
-            --role-name $ENVIRONMENT-karpenter-node-role
           echo "Instance profile created successfully"
         fi
+        aws iam add-role-to-instance-profile \
+          --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile \
+          --role-name $ENVIRONMENT-karpenter-node-role || echo "Role already attached or attachment failed"
 
     - name: Deploy Karpenter
       if: ${{ github.event.inputs.addon == 'karpenter' }}
