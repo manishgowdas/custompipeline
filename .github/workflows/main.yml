@@ -258,6 +258,9 @@ jobs:
     - name: Create Karpenter IAM Policy
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
+    - name: Create Karpenter IAM Policy
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
         cat > karpenter-policy.json <<EOF
         {
           "Version": "2012-10-17",
@@ -265,22 +268,47 @@ jobs:
             {
               "Effect": "Allow",
               "Action": [
-                "ssm:GetParameter",
+                "eks:DescribeCluster"
+              ],
+              "Resource": "arn:aws:eks:$AWS_REGION:$AWS_ACCOUNT_ID:cluster/$CLUSTER_NAME"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:GetInstanceProfile",
+                "iam:ListInstanceProfiles",
+                "iam:CreateInstanceProfile",
+                "iam:DeleteInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
                 "iam:PassRole",
-                "ec2:DescribeImages",
+                "iam:TagInstanceProfile",
+                "iam:UntagInstanceProfile"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
                 "ec2:RunInstances",
+                "ec2:TerminateInstances",
+                "ec2:DescribeInstances",
                 "ec2:DescribeSubnets",
                 "ec2:DescribeSecurityGroups",
-                "ec2:DescribeLaunchTemplates",
-                "ec2:DescribeInstances",
                 "ec2:DescribeInstanceTypes",
+                "ec2:DescribeImages",
+                "ec2:CreateLaunchTemplate",
+                "ec2:CreateLaunchTemplateVersion",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:DeleteLaunchTemplateVersions",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeLaunchTemplateVersions",
                 "ec2:DescribeInstanceTypeOfferings",
                 "ec2:DescribeAvailabilityZones",
-                "ec2:DeleteLaunchTemplate",
                 "ec2:CreateTags",
-                "ec2:CreateLaunchTemplate",
                 "ec2:CreateFleet",
                 "ec2:DescribeSpotPriceHistory",
+                "ssm:GetParameter",
                 "pricing:GetProducts"
               ],
               "Resource": "*"
@@ -382,22 +410,37 @@ jobs:
           --role-name $ENVIRONMENT-karpenter-node-role \
           --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || true
 
+    - name: Create Karpenter Node Instance Profile
+      if: ${{ github.event.inputs.addon == 'karpenter' }}
+      run: |
+        if aws iam get-instance-profile --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile >/dev/null 2>&1; then
+          echo "Instance profile already exists, skipping..."
+        else
+          aws iam create-instance-profile --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile
+          aws iam add-role-to-instance-profile \
+            --instance-profile-name $ENVIRONMENT-karpenter-node-instance-profile \
+            --role-name $ENVIRONMENT-karpenter-node-role
+          echo "Instance profile created successfully"
+        fi
+
     - name: Deploy Karpenter
       if: ${{ github.event.inputs.addon == 'karpenter' }}
       run: |
-        helm repo add karpenter https://charts.karpenter.sh/
-        helm repo update
+        helm pull oci://public.ecr.aws/karpenter/karpenter --version 1.8.5 --untar
+        tar -xvf karpenter-1.8.5.tgz
+        kubectl apply -f karpenter/crds/
         kubectl create serviceaccount karpenter -n kube-system --dry-run=client -o yaml | kubectl apply -f -
         kubectl annotate serviceaccount karpenter \
           -n kube-system \
           eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
-        helm upgrade --install karpenter karpenter/karpenter \
+        helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+          --version 1.8.5 \
           --namespace kube-system \
           --set serviceAccount.create=false \
           --set serviceAccount.name=karpenter \
           --set clusterName=$CLUSTER_NAME \
           --set clusterEndpoint=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query "cluster.endpoint" --output text) \
-          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-role
+          --set aws.defaultInstanceProfile=$ENVIRONMENT-karpenter-node-instance-profile
 
     # --- Doppler ---
     - name: Deploy Doppler
