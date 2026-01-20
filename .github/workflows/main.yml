@@ -278,6 +278,31 @@ jobs:
                 "ec2:CreateLaunchTemplate",
                 "ec2:CreateFleet",
                 "ec2:DescribeSpotPriceHistory",
+                "eks:DescribeCluster",
+                "iam:CreateInstanceProfile",
+                "iam:ListInstanceProfiles",
+                "ssm:GetParameter",
+                "iam:PassRole",
+                "ec2:DescribeImages",
+                "ec2:RunInstances",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceTypes",
+                "ec2:DescribeInstanceTypeOfferings",
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DeleteLaunchTemplate",
+                "ec2:CreateTags",
+                "ec2:CreateLaunchTemplate",
+                "ec2:CreateFleet",
+                "ec2:DescribeSpotPriceHistory",
+                "pricing:GetProducts",
+                "eks:DescribeCluster",
+                "ec2:TerminateInstances",
+                "iam:GetInstanceProfile",
+                "iam:AddRoleToInstanceProfile",
+                "iam:RemoveRoleFromInstanceProfile",
                 "pricing:GetProducts"
               ],
               "Resource": "*"
@@ -379,21 +404,30 @@ jobs:
           --role-name $ENVIRONMENT-karpenter-node-role \
           --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore || true
 
-    - name: Deploy Karpenter
-      if: ${{ github.event.inputs.addon == 'karpenter' }}
-      run: |
-        helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
-          --version "1.8.5" \
-          --namespace kube-system \
-          --create-namespace \
-          --set "settings.clusterName=$CLUSTER_NAME" \
-          --set "settings.interruptionQueue=$CLUSTER_NAME" \
-          --set controller.resources.requests.cpu=1 \
-          --set controller.resources.requests.memory=1Gi \
-          --set controller.resources.limits.cpu=1 \
-          --set controller.resources.limits.memory=1Gi \
-          --set settings.interruptionQueue="" \
-          --wait
+        - name: Deploy Karpenter
+        if: ${{ github.event.inputs.addon == 'karpenter' }}
+        run: |
+          helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+            --version "1.8.5" \
+            --namespace kube-system \
+            --create-namespace \
+            --set "settings.clusterName=$CLUSTER_NAME" \
+            --set "settings.interruptionQueue=$CLUSTER_NAME" \
+            --set controller.resources.requests.cpu=1 \
+            --set controller.resources.requests.memory=1Gi \
+            --set controller.resources.limits.cpu=1 \
+            --set controller.resources.limits.memory=1Gi \
+            --set settings.interruptionQueue="" \
+            --wait
+  
+          # Patch service account to ensure token mounting
+          kubectl patch serviceaccount karpenter -n kube-system -p '{"automountServiceAccountToken": true}'
+  
+          # Annotate service account with IAM role
+          kubectl annotate serviceaccount karpenter \
+            -n kube-system \
+            eks.amazonaws.com/role-arn=arn:aws:iam::$AWS_ACCOUNT_ID:role/$ENVIRONMENT-karpenter-controller-role --overwrite
+  
 
 
         # --- Doppler ---
